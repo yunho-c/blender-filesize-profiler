@@ -56,81 +56,75 @@ def estimate_mesh_data_size(mesh):
 
 
 def analyze_object(obj):
-    """Analyzes a single Blender object and prints its estimated data footprint."""
-    print(f'\n--- Object: "{obj.name}" (Type: {obj.type}) ---')
+    """Analyzes a single Blender object and returns its estimated data footprint as a dictionary."""
+    obj_data = {
+        "name": obj.name,
+        "type": obj.type,
+        "total_estimated_size": 0,
+        "mesh_data": None,
+        "curve_data": None,
+        "light_data": None,
+        "materials": [],
+        "particle_systems": [],
+    }
 
     total_object_estimated_size = 0
-    mesh_data_original_size = 0
-    mesh_data_evaluated_size = 0
-    textures_total_size = 0
 
     if obj.type == "MESH":
-        # --- Original Mesh Data (before modifiers) ---
         mesh = obj.data
-        print(f'  Mesh Data (Original): "{mesh.name}"')
-        print(f"    Vertices: {len(mesh.vertices)}")
-        print(f"    Edges: {len(mesh.edges)}")
-        print(f"    Polygons: {len(mesh.polygons)}")
-        print(f"    UV Layers: {len(mesh.uv_layers)}")
-        print(f"    Vertex Colors: {len(mesh.vertex_colors)}")
+        mesh_info = {
+            "name": mesh.name,
+            "vertices": len(mesh.vertices),
+            "edges": len(mesh.edges),
+            "polygons": len(mesh.polygons),
+            "uv_layers": len(mesh.uv_layers),
+            "vertex_colors": len(mesh.vertex_colors),
+            "users": mesh.users,
+            "estimated_size_bytes": 0,
+            "modifiers": [],
+            "evaluated_mesh": None,
+        }
 
         mesh_data_original_size = estimate_mesh_data_size(mesh)
+        mesh_info["estimated_size_bytes"] = mesh_data_original_size
         total_object_estimated_size += mesh_data_original_size
-        print(f"    Estimated Raw Mesh Size: {format_size(mesh_data_original_size)}")
-        if mesh.users > 1:
-            print(
-                f"    * Note: This mesh data ('{mesh.name}') is used by {mesh.users} objects."
-            )
 
-        # --- Modifiers ---
         if obj.modifiers:
-            print(f"  Modifiers ({len(obj.modifiers)}):")
             for mod in obj.modifiers:
-                print(
-                    f'    - "{mod.name}" (Type: {mod.type}, Show in Viewport: {mod.show_viewport})'
+                mesh_info["modifiers"].append(
+                    {"name": mod.name, "type": mod.type, "show_viewport": mod.show_viewport}
                 )
-        else:
-            print("  Modifiers: None")
 
-        # --- Evaluated Mesh Data (after modifiers) ---
-        print("  Evaluated Mesh Data (After Modifiers):")
-        eval_mesh_verts_count_str = 'N/A'
-        eval_mesh_polys_count_str = 'N/A'
+        eval_mesh_data = {
+            "vertices": "N/A",
+            "polygons": "N/A",
+            "estimated_size_bytes": 0,
+            "error": None,
+        }
+        mesh_data_evaluated_size = 0
         try:
             depsgraph = bpy.context.evaluated_depsgraph_get()
             eval_obj = obj.evaluated_get(depsgraph)
-            # For some object types, .data might not be a mesh directly after evaluation
-            # or it might be an instance. to_mesh() creates a new mesh.
             eval_mesh = eval_obj.to_mesh(
                 preserve_all_data_layers=True, depsgraph=depsgraph
             )
             if eval_mesh:
-                eval_mesh_verts_count_str = str(len(eval_mesh.vertices))
-                eval_mesh_polys_count_str = str(len(eval_mesh.polygons))
-                print(f"    Vertices: {eval_mesh_verts_count_str}")
-                print(f"    Polygons: {eval_mesh_polys_count_str}")
+                eval_mesh_data["vertices"] = len(eval_mesh.vertices)
+                eval_mesh_data["polygons"] = len(eval_mesh.polygons)
                 mesh_data_evaluated_size = estimate_mesh_data_size(eval_mesh)
-                # This evaluated mesh size isn't added to total_object_estimated_size directly
-                # as it's a result of the original mesh + modifiers, not separate stored data.
-                # However, it's a good indicator of render-time complexity.
-                print(
-                    f"    Estimated Evaluated Mesh Size (indicative): {format_size(mesh_data_evaluated_size)}"
-                )
-                eval_obj.to_mesh_clear()  # Clean up the temporary mesh
+                eval_mesh_data["estimated_size_bytes"] = mesh_data_evaluated_size
+                eval_obj.to_mesh_clear()
             else:
-                print(
-                    "    Could not convert evaluated object to mesh for stats (e.g., for curves not converted)."
-                )
+                eval_mesh_data["error"] = "Could not convert evaluated object to mesh"
         except Exception as e:
-            print(f"    Could not evaluate mesh: {e}")
-            print(
-                f"    (Original mesh stats will be used for total if evaluation fails)"
-            )
-            mesh_data_evaluated_size = mesh_data_original_size  # Fallback for summary
+            eval_mesh_data["error"] = str(e)
+            mesh_data_evaluated_size = mesh_data_original_size # Fallback
+
+        mesh_info["evaluated_mesh"] = eval_mesh_data
+        obj_data["mesh_data"] = mesh_info
 
     elif obj.type == "CURVE":
         curve = obj.data
-        print(f'  Curve Data: "{curve.name}"')
         num_points = sum(
             len(spline.points) for spline in curve.splines if hasattr(spline, "points")
         )
@@ -139,200 +133,172 @@ def analyze_object(obj):
             for spline in curve.splines
             if hasattr(spline, "bezier_points")
         )
-        print(f"    Splines: {len(curve.splines)}")
-        if num_points > 0:
-            print(f"    Total Points (Poly/NURBS): {num_points}")
-        if num_bezier_points > 0:
-            print(f"    Total Bezier Points: {num_bezier_points}")
-        # Curve data size is harder to generalize simply, depends on point types etc.
-        # A rough estimate:
         curve_data_size = (num_points * 3 * SIZEOF_FLOAT) + (
             num_bezier_points * 9 * SIZEOF_FLOAT
-        )  # handle, point, handle
+        )
         total_object_estimated_size += curve_data_size
-        print(f"    Estimated Curve Points Size: {format_size(curve_data_size)}")
-        if curve.users > 1:
-            print(
-                f"    * Note: This curve data ('{curve.name}') is used by {curve.users} objects."
-            )
+
+        obj_data["curve_data"] = {
+            "name": curve.name,
+            "splines": len(curve.splines),
+            "total_points_poly_nurbs": num_points if num_points > 0 else 0,
+            "total_bezier_points": num_bezier_points if num_bezier_points > 0 else 0,
+            "estimated_size_bytes": curve_data_size,
+            "users": curve.users,
+        }
 
     elif obj.type == "LIGHT":
         light = obj.data
-        print(f'  Light Data: "{light.name}" (Type: {light.type})')
-        print(f"    Energy: {light.energy}")
-        # Light data itself is small, mostly parameters.
+        obj_data["light_data"] = {
+            "name": light.name,
+            "type": light.type,
+            "energy": light.energy,
+            # Light data itself is small, mostly parameters. Size impact is negligible.
+            "estimated_size_bytes": 0
+        }
 
-    # Add more object type handlers here if needed (ARMATURE, LATTICE, FONT, etc.)
-
-    # --- Materials and Textures ---
+    # Materials and Textures
     if obj.material_slots:
-        print(f"  Materials ({len(obj.material_slots)}):")
-        slot_textures_total_size = 0
+        materials_list = []
+        object_textures_total_size = 0
         for slot_index, slot in enumerate(obj.material_slots):
+            mat_data = {"slot_index": slot_index, "name": "Empty", "textures": [], "estimated_textures_size_bytes": 0, "users": 0}
             if slot.material:
                 mat = slot.material
-                print(f'    Slot [{slot_index}]: "{mat.name}"')
-                if mat.users > 1:
-                    print(
-                        f"      * Note: This material ('{mat.name}') is used by {mat.users} objects/slots."
-                    )
+                mat_data["name"] = mat.name
+                mat_data["users"] = mat.users
 
                 material_textures_size = 0
+                textures_in_mat_list = []
                 if mat.use_nodes and mat.node_tree:
-                    texture_nodes_in_mat = []
                     for node in mat.node_tree.nodes:
-                        if node.type == "TEX_IMAGE":
-                            if node.image:
-                                img = node.image
-                                texture_nodes_in_mat.append(img)
+                        if node.type == "TEX_IMAGE" and node.image:
+                            img = node.image
+                            channels = img.channels
+                            bits_per_channel = (
+                                img.depth // channels
+                                if img.depth >= channels and channels > 0
+                                else img.depth
+                            )
+                            if channels == 0: channels = 4
+                            if bits_per_channel == 0: bits_per_channel = 8
 
-                                # Estimate image size (uncompressed)
-                                # depth is per channel bit depth (e.g., 8 for 8-bit, 32 for float)
-                                channels = img.channels
-                                bits_per_channel = (
-                                    img.depth // channels
-                                    if img.depth >= channels and channels > 0
-                                    else img.depth
-                                )  # Heuristic for packed formats
-                                if channels == 0:
-                                    channels = (
-                                        4  # Default if unknown, e.g. for .hdr sometimes
-                                    )
-                                if bits_per_channel == 0:
-                                    bits_per_channel = 8  # Default if unknown
+                            img_size = (
+                                img.size[0] * img.size[1] * channels * (bits_per_channel / 8)
+                            )
+                            material_textures_size += img_size
 
-                                img_size = (
-                                    img.size[0]
-                                    * img.size[1]
-                                    * channels
-                                    * (bits_per_channel / 8)
-                                )
-                                material_textures_size += img_size
+                            textures_in_mat_list.append({
+                                "name": img.name,
+                                "source": img.source,
+                                "packed": bool(img.packed_file),
+                                "packed_size_bytes": img.packed_file.size if img.packed_file else 0,
+                                "filepath": img.filepath_from_user(),
+                                "dimensions": [img.size[0], img.size[1]],
+                                "channels": channels,
+                                "bit_depth_per_channel": bits_per_channel,
+                                "estimated_raw_size_bytes": img_size,
+                                "users": img.users,
+                            })
+                mat_data["textures"] = textures_in_mat_list
+                mat_data["estimated_textures_size_bytes"] = material_textures_size
+                object_textures_total_size += material_textures_size
+            materials_list.append(mat_data)
+        obj_data["materials"] = materials_list
+        total_object_estimated_size += object_textures_total_size
 
-                                print(f'      - Image Texture: "{img.name}"')
-                                print(f"          Source: {img.source}")
-                                if img.packed_file:
-                                    print(
-                                        f"          Packed: Yes (Size: {format_size(img.packed_file.size)})"
-                                    )
-                                else:
-                                    print(
-                                        f"          Filepath: {img.filepath_from_user()}"
-                                    )
-                                print(
-                                    f"          Dimensions: {img.size[0]}x{img.size[1]}, Channels: {channels}, Bit Depth: {bits_per_channel} per channel"
-                                )
-                                print(
-                                    f"          Estimated Raw Texture Size: {format_size(img_size)}"
-                                )
-                                if img.users > 1:
-                                    print(
-                                        f"          * Note: This image data ('{img.name}') is used by {img.users} users (nodes/textures)."
-                                    )
-
-                    if not texture_nodes_in_mat:
-                        print("      - No Image Texture nodes found in this material.")
-
-                slot_textures_total_size += material_textures_size
-                if material_textures_size > 0:
-                    print(
-                        f'    Estimated Textures Size for "{mat.name}": {format_size(material_textures_size)}'
-                    )
-
-            else:
-                print(f"    Slot [{slot_index}]: Empty")
-
-        textures_total_size = slot_textures_total_size
-        total_object_estimated_size += textures_total_size
-        if textures_total_size > 0:
-            print(
-                f"  Total Estimated Textures Size for this object: {format_size(textures_total_size)}"
-            )
-    else:
-        print("  Materials: None")
-
-    # --- Particle Systems ---
+    # Particle Systems
     if obj.particle_systems:
-        print(f"  Particle Systems ({len(obj.particle_systems)}):")
+        particle_systems_list = []
+        object_particles_total_size = 0
         for psys_idx, psys in enumerate(obj.particle_systems):
             settings = psys.settings
-            print(f'    System [{psys_idx}]: "{psys.name}" (Type: {settings.type})')
-            print(
-                f"      Count: {settings.count} (Viewport: {settings.display_percentage}%)"
-            )
-            # Estimating particle data size is complex: depends on instance type, hair data, physics cache etc.
-            # This is a very rough placeholder, as actual memory is much more involved.
             particle_base_size = settings.count * (3 * SIZEOF_FLOAT)  # Position
             if settings.type == "HAIR":
                 particle_base_size += (
                     settings.count * settings.hair_step * (3 * SIZEOF_FLOAT)
-                )  # Segments
-            print(
-                f"      Rough Estimated Base Particle Data Size: {format_size(particle_base_size)}"
-            )
-            total_object_estimated_size += (
-                particle_base_size  # Add with caution, very approximate
-            )
-            if settings.users > 1:
-                print(
-                    f"      * Note: These particle settings ('{settings.name}') are used by {settings.users} systems."
                 )
+            object_particles_total_size += particle_base_size
+            particle_systems_list.append({
+                "name": psys.name,
+                "type": settings.type,
+                "count": settings.count,
+                "display_percentage": settings.display_percentage,
+                "estimated_base_size_bytes": particle_base_size,
+                "settings_users": settings.users,
+            })
+        obj_data["particle_systems"] = particle_systems_list
+        total_object_estimated_size += object_particles_total_size
 
-    print(
-        f'\n  Estimated Total for "{obj.name}" (Original Mesh/Curve + Textures + Basic Particles): {format_size(total_object_estimated_size)}'
-    )
-    if obj.type == "MESH":
-        print(
-            f"    (Evaluated mesh complexity: Verts={eval_mesh_verts_count_str}, Polys={eval_mesh_polys_count_str})"
-        )
+    obj_data["total_estimated_size"] = total_object_estimated_size
+    return obj_data
 
 
 def profile_blend_file(blend_file_path: str, analyze_all_scene_objects: bool = False):
     """
-    Opens a .blend file and analyzes its objects.
+    Opens a .blend file and analyzes its objects, returning structured data.
 
     :param blend_file_path: Path to the .blend file.
     :param analyze_all_scene_objects: If True, analyzes all objects in bpy.data.objects.
                                       If False (default), analyzes objects in the current scene (bpy.context.scene.objects).
-    :raises RuntimeError: If the .blend file cannot be opened.
+    :return: A dictionary containing the analysis results or an error message.
+    :raises RuntimeError: If the .blend file cannot be opened (re-raised).
     """
-    print(f"Starting Object Data Profiler for: {blend_file_path}")
+    analysis_result = {
+        "file_path": blend_file_path,
+        "status": "success",
+        "message": "",
+        "scene_name": None,
+        "analysis_scope": "",
+        "objects": [],
+        "summary": {
+            "total_objects_analyzed": 0,
+            "total_estimated_size_all_objects": 0,
+            # More summary fields can be added here
+        }
+    }
 
     try:
         bpy.ops.wm.open_mainfile(filepath=blend_file_path)
-        print(f"Successfully opened: {blend_file_path}")
+        analysis_result["message"] = f"Successfully opened: {blend_file_path}"
     except RuntimeError as e:
-        print(f"Error opening .blend file '{blend_file_path}': {e}")
-        print(
-            "Please ensure Blender is installed and `bpy` can operate, or Blender is run in background mode if required."
-        )
-        raise  # Re-raise the exception to be handled by the caller (e.g., cli.py)
+        analysis_result["status"] = "error"
+        analysis_result["message"] = f"Error opening .blend file '{blend_file_path}': {e}. " \
+                                     "Ensure Blender is installed and `bpy` can operate, " \
+                                     "or Blender is run in background mode if required."
+        # It's better to let the caller handle the exception if it's critical
+        raise
 
     objects_to_analyze = []
     if analyze_all_scene_objects:
-        print("Analyzing all objects found in bpy.data.objects.")
+        analysis_result["analysis_scope"] = "all_data_objects"
         objects_to_analyze = list(bpy.data.objects)
     else:
         if bpy.context.scene:
-            print(f"Analyzing objects in the current scene: {bpy.context.scene.name}")
+            analysis_result["scene_name"] = bpy.context.scene.name
+            analysis_result["analysis_scope"] = f"scene_objects ({bpy.context.scene.name})"
             objects_to_analyze = list(bpy.context.scene.objects)
         else:
-            print(
-                "No active scene found after loading .blend file. Cannot analyze scene objects."
-            )
-            print(
-                "Consider using the option to analyze all objects in the file if appropriate."
-            )
-            # Or raise an error, or return an empty result/status
-            return  # Or raise ValueError("No active scene to analyze")
+            analysis_result["status"] = "error"
+            analysis_result["message"] = "No active scene found. Cannot analyze scene objects. " \
+                                         "Consider using the option to analyze all objects."
+            return analysis_result # Return early with error
 
     if not objects_to_analyze:
-        print("No objects found to analyze based on the criteria.")
+        analysis_result["message"] += " No objects found to analyze based on the criteria."
+        # Not necessarily an error, could be an empty scene.
     else:
-        print(f"Analyzing {len(objects_to_analyze)} object(s):")
+        analysis_result["message"] += f" Analyzing {len(objects_to_analyze)} object(s)."
+        collected_objects_data = []
+        total_size_sum = 0
         for obj in objects_to_analyze:
-            analyze_object(obj)  # analyze_object is defined in this file
+            obj_data = analyze_object(obj) # analyze_object now returns a dict
+            collected_objects_data.append(obj_data)
+            total_size_sum += obj_data.get("total_estimated_size", 0)
 
-    # The disclaimers previously in __main__ can be handled by the CLI if needed.
-    # For example, by returning structured data from this function and having the CLI print summaries.
-    print(f"\n--- Analysis complete for {blend_file_path} ---")
+        analysis_result["objects"] = collected_objects_data
+        analysis_result["summary"]["total_objects_analyzed"] = len(collected_objects_data)
+        analysis_result["summary"]["total_estimated_size_all_objects"] = total_size_sum
+
+    analysis_result["message"] += f" Analysis complete for {blend_file_path}."
+    return analysis_result

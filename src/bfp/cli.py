@@ -1,13 +1,15 @@
 import argparse
 import sys
+import json # For verbose printing of the results dict
 
 from bfp import analysis
+from bfp import serialization # Import the new serialization module
 
 def main():
     parser = argparse.ArgumentParser(
         prog="bfp",
         description="BFP: Blender Filesize Profiler - Analyzes object data sizes in a .blend file.",
-        epilog="Example: bfp input.blend --all-objects --verbose",
+        epilog="Example: bfp input.blend --all-objects --verbose --save results.yaml",
     )
 
     parser.add_argument(
@@ -34,7 +36,7 @@ def main():
         type=str,
         default=None,  # if unprovided
         metavar="FILEPATH",
-        help="Save analysis results to a file (Not yet implemented).",
+        help="Save analysis results to a YAML file.",
     )
 
     parser.add_argument(
@@ -62,41 +64,67 @@ def main():
     # Process
     if args.verbose:
         print("[bfp] Handing off to profiler...")
+
+    analysis_data = None
     try:
-        # Assuming bfp.py is in the bfp package directory and contains profile_blend_file
-        analysis.profile_blend_file(args.input_path, analyze_all_scene_objects=args.all_objects)
-    except FileNotFoundError: # More specific error from trying to open the .blend file
+        analysis_data = analysis.profile_blend_file(
+            args.input_path, analyze_all_scene_objects=args.all_objects
+        )
+
+        if args.verbose:
+            print("[bfp] Profiler finished. Raw analysis data:")
+            # Pretty print the dictionary for readability if verbose
+            print(json.dumps(analysis_data, indent=2))
+        else:
+            # Print a concise summary if not verbose
+            if analysis_data and analysis_data.get("status") == "success":
+                summary = analysis_data.get("summary", {})
+                print(f"Analysis Summary for: {analysis_data.get('file_path')}")
+                print(f"  Scene: {analysis_data.get('scene_name', 'N/A')}")
+                print(f"  Scope: {analysis_data.get('analysis_scope', 'N/A')}")
+                print(f"  Objects Analyzed: {summary.get('total_objects_analyzed', 0)}")
+                total_size_bytes = summary.get('total_estimated_size_all_objects', 0)
+                print(f"  Total Estimated Size: {analysis.format_size(total_size_bytes)}") # Use format_size from analysis
+                if analysis_data.get("message"):
+                     print(f"  Status: {analysis_data.get('message')}")
+            elif analysis_data:
+                print(f"Analysis failed: {analysis_data.get('message')}", file=sys.stderr)
+
+
+    except FileNotFoundError:
         print(f"  Error: Input .blend file '{args.input_path}' not found.", file=sys.stderr)
         sys.exit(1)
-    except RuntimeError as e: # Catch errors from bpy.ops.wm.open_mainfile or other bpy issues
+    except RuntimeError as e:
         print(f"  Error during Blender processing: {e}", file=sys.stderr)
         print(f"  Ensure the .blend file is valid and Blender's Python environment (bpy) is correctly set up and accessible.")
         sys.exit(1)
-    except Exception as e: # Catch any other unexpected errors
+    except Exception as e:
         print(f"  An unexpected error occurred: {e}", file=sys.stderr)
         sys.exit(1)
 
+    # Save results
+    if args.save and analysis_data and analysis_data.get("status") == "success":
+        if args.verbose:
+            print(f"[bfp] Serializing analysis results to: {args.save}")
+        try:
+            # The analysis_data from profile_blend_file should be directly serializable
+            serialization.serialize_to_yaml(analysis_data, args.save)
+        except Exception as e:
+            print(f"  Error saving to file '{args.save}': {e}", file=sys.stderr)
+            # Decide if this should be a fatal error (sys.exit(1)) or just a warning
+            # For now, let it continue and exit normally if analysis itself was okay.
+    elif args.save and (not analysis_data or analysis_data.get("status") != "success"):
+        print(f"  Skipping YAML serialization due to analysis error or no data.", file=sys.stderr)
 
-    # Display section is now handled by profile_blend_file's print statements.
-    # The placeholder file reading logic below is no longer needed.
-    # try:
-    #     with open(args.input_path, "r") as f: # This would fail for a .blend file anyway
-    #         content_preview = f.read(100)  # Read first 100 chars
-    #         print(f"  First 100 chars of input: '{content_preview}...'\n")
-    # except FileNotFoundError:
-    #     print(f"  Error: Input file '{args.input_path}' not found.", file=sys.stderr)
-    #     sys.exit(1)
-    # except IOError as e:
-    #     print(
-    #         f"  Error: Could not read input file '{args.input_path}': {e}",
-    #         file=sys.stderr,
-    #     )
-    #     sys.exit(1)
 
     # End
     if args.verbose:
         print("[bfp] CLI finished.")
-    sys.exit(0)
+
+    if analysis_data and analysis_data.get("status") == "error":
+        sys.exit(1) # Exit with error if analysis reported an error
+    else:
+        sys.exit(0)
 
 
 def get_project_version():

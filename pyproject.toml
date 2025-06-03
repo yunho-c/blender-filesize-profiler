@@ -17,7 +17,7 @@ classifiers = [
   "Environment :: Console",
 ]
 # requires-python = ">=3.8"
-dependencies = ["bpy"]
+dependencies = ["bpy", "PyYAML"]
 
 [project.scripts]
 bfp = "bfp.cli:main"
