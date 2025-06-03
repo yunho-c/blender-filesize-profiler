@@ -94,6 +94,8 @@ def analyze_object(obj):
 
         # --- Evaluated Mesh Data (after modifiers) ---
         print("  Evaluated Mesh Data (After Modifiers):")
+        eval_mesh_verts_count_str = 'N/A'
+        eval_mesh_polys_count_str = 'N/A'
         try:
             depsgraph = bpy.context.evaluated_depsgraph_get()
             eval_obj = obj.evaluated_get(depsgraph)
@@ -103,8 +105,10 @@ def analyze_object(obj):
                 preserve_all_data_layers=True, depsgraph=depsgraph
             )
             if eval_mesh:
-                print(f"    Vertices: {len(eval_mesh.vertices)}")
-                print(f"    Polygons: {len(eval_mesh.polygons)}")
+                eval_mesh_verts_count_str = str(len(eval_mesh.vertices))
+                eval_mesh_polys_count_str = str(len(eval_mesh.polygons))
+                print(f"    Vertices: {eval_mesh_verts_count_str}")
+                print(f"    Polygons: {eval_mesh_polys_count_str}")
                 mesh_data_evaluated_size = estimate_mesh_data_size(eval_mesh)
                 # This evaluated mesh size isn't added to total_object_estimated_size directly
                 # as it's a result of the original mesh + modifiers, not separate stored data.
@@ -279,7 +283,7 @@ def analyze_object(obj):
     )
     if obj.type == "MESH":
         print(
-            f"    (Evaluated mesh complexity: Verts={len(eval_mesh.vertices) if 'eval_mesh' in locals() and eval_mesh else 'N/A'}, Polys={len(eval_mesh.polygons) if 'eval_mesh' in locals() and eval_mesh else 'N/A'})"
+            f"    (Evaluated mesh complexity: Verts={eval_mesh_verts_count_str}, Polys={eval_mesh_polys_count_str})"
         )
 
 
