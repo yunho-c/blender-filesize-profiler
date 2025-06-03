@@ -1,0 +1,26 @@
+[build-system]
+requires = ["setuptools>=61.0"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "bfp"
+version = "0.0.1"
+description = "BFP: Blender Filesize Profiler."
+authors = [{ name = "Yunho Cho", email = "yunhocho.career@gmail.com" }]
+readme = "README.md"
+license = { text = "MIT License" }
+classifiers = [
+  "Programming Language :: Python :: 3",
+  "License :: OSI Approved :: MIT License",
+  "Operating System :: OS Independent",
+  "Topic :: Utilities",
+  "Environment :: Console",
+]
+# requires-python = ">=3.8"
+dependencies = ["bpy"]
+
+[project.scripts]
+bfp = "bfp.cli:main"
+
+[project.urls]
+Homepage = "https://github.com/yunho-c/blender-filesize-profiler"
